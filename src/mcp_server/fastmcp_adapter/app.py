@@ -1,6 +1,8 @@
 """FastMCP composition root and ASGI entry point."""
 
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from .auth import build_auth_provider
 from .config import FastMCPServerSettings, get_fastmcp_settings
@@ -20,6 +22,12 @@ def create_fastmcp_server(settings: FastMCPServerSettings | None = None) -> Fast
         on_duplicate="error",
     )
     register_tools(server)
+
+    @server.custom_route("/health", methods=["GET"])
+    async def health(request: Request) -> JSONResponse:
+        # Liveness only: providers are initialized lazily by the business tools.
+        return JSONResponse({"status": "ok"})
+
     return server
 
 

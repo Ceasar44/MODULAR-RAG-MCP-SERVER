@@ -12,7 +12,7 @@ llm:
   azure_endpoint: null
   base_url: "https://openrouter.ai/api/v1"
   api_version: null
-  api_key: ""
+  api_key: null
   temperature: 0.0
   max_tokens: 4096
 
@@ -28,7 +28,7 @@ embedding:
   deployment_name: null
   base_url: "https://openrouter.ai/api/v1"
   api_version: null
-  api_key: ""
+  api_key: null
   # OpenAI-specific settings (if provider is openai):
   # api_key: "YOUR_API_KEY_HERE"
 
@@ -44,7 +44,7 @@ vision_llm:
   deployment_name: null
   base_url: "https://openrouter.ai/api/v1"
   api_version: null
-  api_key: ""
+  api_key: null
   # Ollama-specific settings (if provider is ollama):
   # base_url: "http://localhost:11434"
   max_image_size: 2048  # Max dimension (width/height) for image compression
@@ -110,7 +110,7 @@ ingestion:
     # MinerU-specific configuration (only used when type: mineru)
     mineru:
       api_url: "https://mineru.net/api/v4"  # MinerU API endpoint
-      api_key: ""  # Set to your MinerU API key or use environment variable MINERU_API_KEY
+      api_key: null  # Set to your MinerU API key or use environment variable MINERU_API_KEY
       timeout: 60  # Timeout for HTTP requests and polling (seconds)
       model_version: "vlm"  # MinerU model version
       poll_interval: 5  # Interval between status polls (seconds)

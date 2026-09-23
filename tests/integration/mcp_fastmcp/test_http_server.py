@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -5,6 +6,18 @@ from fastmcp.client.transports import StreamableHttpTransport
 from src.mcp_server.fastmcp_adapter.registry import get_registered_tool_names
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_health_without_token_when_mcp_requires_auth(http_server):
+    async with http_server(token="correct", path="/custom/mcp") as url:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url.removesuffix("/custom/mcp") + "/health")
+            assert response.status_code == 200
+            assert response.json() == {"status": "ok"}
+        # The operational route must not make MCP tools anonymously accessible.
+        with pytest.raises(Exception):
+            async with Client(StreamableHttpTransport(url), mode="legacy") as client:
+                await client.list_tools()
 
 
 @pytest.mark.parametrize("mode", ["auto", "legacy"])

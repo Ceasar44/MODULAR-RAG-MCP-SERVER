@@ -3,6 +3,113 @@
 HTTP 入口复用已有三个 RAG 工具，默认监听 `http://localhost:8002/mcp`。
 原 stdio 入口 `python -m src.mcp_server.server` 继续可用。
 
+## Docker 部署（Linux 服务器）
+
+仓库根目录提供 `Dockerfile`、`compose.yaml`、`.env.production.example` 和
+`config/settings.production.yaml`。默认使用单容器、单进程，MCP 路径固定为 `/mcp`，
+宿主机仅监听 `127.0.0.1:8002`，通过 HTTPS 网关对外提供服务。
+
+### 准备配置与数据
+
+```sh
+cp .env.production.example .env.production
+chmod 600 .env.production
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+mkdir -p data logs
+sudo chown -R 10001:10001 data logs
+```
+
+将生成的令牌写入 `.env.production` 的 `RAG_MCP_TOKEN`，填写 `OPENAI_API_KEY`。
+使用 MinerU 入库时还需填写 `MINERU_API_KEY`。不要提交填好凭据的文件。
+Compose 强制开启认证，并在 Token 或模型密钥为空时拒绝启动。
+环境变量由 Compose 显式传入容器，应用本身不读取 `.env` 文件。
+可参考 [Docker Compose 环境变量说明](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)。
+
+生产 YAML 保留了现有模型配置，但清除了 API Key；部署前核对模型、服务地址和
+embedding 实际维度是否与已有知识库一致。三个 OpenAI-compatible provider 共用
+`OPENAI_API_KEY`。YAML 的 `api_key` 必须保持 `null`，否则其优先级高于环境变量。
+配置加载器不支持 `${VAR}` 字符串插值。
+
+迁移知识库时暂停入库，完整复制 `data/`，包含 Chroma、BM25、图片索引、图片文件和
+入库记录，然后重新检查目标目录权限。不要只复制 Chroma，也不要在写入期间直接拷贝数据库。
+检查迁移数据中的 Windows 绝对路径；需要时重新入库。更换 embedding 模型需要重建索引。
+新部署没有数据时，需先通过入库脚本建立知识库。
+
+容器以 UID/GID `10001:10001` 运行。配置文件只读挂载，`data/` 和 `logs/` 可写挂载；
+挂载源必须已存在，避免 Docker 自动创建错误的目录或权限。
+镜像只复制源码和构建元数据，本地配置、凭据、数据、日志均不进入构建上下文。
+当前仍使用项目声明的依赖范围（FastMCP 固定为 4.0.3）；其他依赖尚未形成经过 Linux
+验证的完整锁文件。首次验证成功后应保存并复用该镜像，避免每次发布重新解析依赖。
+
+### 启动与检查
+
+```sh
+docker compose --env-file .env.production config --quiet
+docker compose --env-file .env.production up -d --build
+docker compose --env-file .env.production ps
+docker compose --env-file .env.production logs --tail=100 rag-system
+curl -f http://127.0.0.1:8002/health
+```
+
+`/health` 无需 Token，仅返回 `{"status":"ok"}`，表示进程可以响应 HTTP，
+不代表延迟初始化的数据库或模型 API 可用。上线还必须执行一次真实检索。
+Docker 的 unhealthy 状态用于监控；`restart: unless-stopped` 仅在进程退出等情况下重启，
+不会因 unhealthy 自动重启。Docker 日志有大小轮转，`logs/traces.jsonl` 需另设归档策略。
+
+### HTTPS 网关与客户端
+
+`deploy/nginx.conf.example` 是宿主机 Nginx 的配置示例。替换域名、证书路径，
+使用已有证书配置 HTTPS，再执行 `nginx -t` 并重载 Nginx。它保留认证和 MCP 协议头，
+关闭响应缓冲，将 `/mcp` 原样转发到本机 8002 端口。
+
+外部客户端使用 `https://rag.example.com/mcp`，发送
+`Authorization: Bearer <RAG_MCP_TOKEN>`。这是 MCP Streamable HTTP 端点，
+应使用 MCP 客户端完成协议调用，而非普通 REST JSON 请求。
+内部 Agent 若加入同一个 Docker 网络，可使用 `http://rag-system:8002/mcp`。
+若 Nginx 也在容器中，应加入该网络并把 upstream 改为 `http://rag-system:8002`。
+
+客户端验收示例（在安装 FastMCP 的环境中执行，并事先导出这两个环境变量）：
+
+```python
+import asyncio
+import os
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
+
+async def main():
+    transport = StreamableHttpTransport(
+        os.environ["RAG_MCP_URL"],
+        headers={"Authorization": f"Bearer {os.environ['RAG_MCP_TOKEN']}"},
+    )
+    async with Client(transport) as client:
+        print([tool.name for tool in await client.list_tools()])
+        print(await client.call_tool("list_collections", {}))
+        print(await client.call_tool("query_knowledge_hub", {
+            "query": "替换成已有知识库可以回答的问题", "top_k": 3,
+        }))
+
+asyncio.run(main())
+```
+
+验收时还需检查错误 Token 被拒绝、文档摘要/图片可返回，以及重建容器后数据仍可检索。
+
+### 文档入库与更新
+
+MCP 只公开三个读取工具。把源文档放入 `data/documents/` 后，使用单独的一次性任务入库。
+为避免当前本地索引的并发写入和查询缓存问题，暂停服务，入库后重新启动：
+
+```sh
+docker compose --env-file .env.production stop rag-system
+docker compose --env-file .env.production run --rm --no-deps rag-system \
+  python scripts/ingest.py --path /app/data/documents --collection knowledge_hub
+docker compose --env-file .env.production up -d rag-system
+```
+
+升级前备份 `data/`，保留上一版镜像；数据库格式发生变化时，回滚必须同时恢复匹配的数据备份。
+当前查询锁保护 collection 切换，因此查询串行执行。不要直接增加 workers 或共享本地数据卷
+运行多个副本。扩展前需处理查询实例隔离、存储服务化及 MCP 会话策略；
+参考 [FastMCP HTTP 部署说明](https://github.com/PrefectHQ/fastmcp/blob/main/docs/deployment/http.mdx)。
+
 ## 安装与启动
 
 在项目根目录、已激活的 Python 环境中运行：

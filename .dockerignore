@@ -1,0 +1,14 @@
+# Only include build inputs. Configuration and knowledge bases are runtime mounts.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!README.md
+!main.py
+!src/
+!src/**
+!scripts/
+!scripts/**
+**/__pycache__/
+**/*.py[cod]
+**/.env*
