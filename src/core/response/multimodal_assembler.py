@@ -193,6 +193,12 @@ class MultimodalAssembler:
         
         # Add captions if available
         captions = metadata.get("image_captions", {})
+        if isinstance(captions, list):
+            captions = {
+                item.get("id"): item.get("caption")
+                for item in captions
+                if isinstance(item, dict) and item.get("id") and item.get("caption")
+            }
         if isinstance(captions, dict):
             for ref in refs:
                 if ref.image_id in captions:
@@ -240,13 +246,22 @@ class MultimodalAssembler:
             except Exception as e:
                 logger.warning(f"ImageStorage lookup failed for {ref.image_id}: {e}")
         
-        # Convention-based path: data/images/{collection}/{image_id}.png
+        # Convention-based path. Loader output may be either:
+        # - data/images/{collection}/{image_id}.png
+        # - data/images/{collection}/{doc_hash}/{image_id}.png
         if collection:
             from src.core.settings import resolve_path
             for ext in [".png", ".jpg", ".jpeg", ".webp"]:
                 candidate = resolve_path(f"data/images/{collection}/{ref.image_id}{ext}")
                 if candidate.exists():
                     return str(candidate.resolve())
+
+            collection_dir = resolve_path(f"data/images/{collection}")
+            if collection_dir.exists():
+                for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+                    matches = list(collection_dir.glob(f"*/{ref.image_id}{ext}"))
+                    if matches:
+                        return str(matches[0].resolve())
         
         return None
     

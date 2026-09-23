@@ -190,7 +190,7 @@ class ImageCaptioner(BaseTransform):
                 continue
             
             new_text = chunk.text
-            captions = []
+            captions: Dict[str, str] = {}
             
             for img_id in referenced_ids:
                 img_id_stripped = img_id.strip()
@@ -200,7 +200,7 @@ class ImageCaptioner(BaseTransform):
                     caption = self._caption_cache.get(img_id_stripped)
                 
                 if caption:
-                    captions.append({"id": img_id_stripped, "caption": caption})
+                    captions[img_id_stripped] = caption
                     
                     placeholder = f"[IMAGE: {img_id}]"
                     replacement = f"[IMAGE: {img_id}]\n(Description: {caption})"
@@ -210,9 +210,17 @@ class ImageCaptioner(BaseTransform):
             chunk.text = new_text
             
             if captions:
-                if "image_captions" not in chunk.metadata:
-                    chunk.metadata["image_captions"] = []
-                chunk.metadata["image_captions"].extend(captions)
+                existing_captions = chunk.metadata.get("image_captions", {})
+                if isinstance(existing_captions, list):
+                    existing_captions = {
+                        item.get("id"): item.get("caption")
+                        for item in existing_captions
+                        if isinstance(item, dict) and item.get("id") and item.get("caption")
+                    }
+                if not isinstance(existing_captions, dict):
+                    existing_captions = {}
+                existing_captions.update(captions)
+                chunk.metadata["image_captions"] = existing_captions
             
             processed_chunks.append(chunk)
         

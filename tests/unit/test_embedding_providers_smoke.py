@@ -29,6 +29,10 @@ def mock_settings_openai() -> Any:
     settings.embedding.provider = "openai"
     settings.embedding.model = "text-embedding-3-small"
     settings.embedding.dimensions = 1536
+    settings.embedding.api_key = None
+    settings.embedding.azure_endpoint = None
+    settings.embedding.deployment_name = None
+    settings.embedding.api_version = None
     settings.embedding.base_url = None  # No base_url in settings by default
     return settings
 
@@ -43,6 +47,8 @@ def mock_settings_azure() -> Any:
     settings.embedding.deployment_name = "my-embedding-deployment"
     settings.embedding.azure_endpoint = "https://my-resource.openai.azure.com/"
     settings.embedding.api_version = "2024-02-01"
+    settings.embedding.api_key = None
+    settings.embedding.base_url = None
     settings.embedding.dimensions = None
     return settings
 
@@ -97,6 +103,13 @@ class TestOpenAIEmbedding:
         )
         
         assert embedding.base_url == "https://custom.api.com/v1"
+
+    def test_initialization_with_settings_base_url(self, mock_settings_openai: Any) -> None:
+        """Test initialization with OpenAI-compatible base URL from settings."""
+        mock_settings_openai.embedding.base_url = "https://openrouter.ai/api/v1"
+        embedding = OpenAIEmbedding(mock_settings_openai, api_key="test-key")
+
+        assert embedding.base_url == "https://openrouter.ai/api/v1"
     
     @patch('openai.OpenAI')
     def test_embed_success(
@@ -234,6 +247,7 @@ class TestAzureEmbedding:
         self, mock_settings_azure: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Test initialization with Azure environment variables."""
+        mock_settings_azure.embedding.azure_endpoint = None
         monkeypatch.setenv("AZURE_OPENAI_API_KEY", "azure-env-key")
         monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://env.openai.azure.com/")
         

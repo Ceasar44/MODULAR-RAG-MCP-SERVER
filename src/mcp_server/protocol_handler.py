@@ -240,21 +240,31 @@ def create_mcp_server(
         _register_default_tools(protocol_handler)
 
     # Create low-level server
-    server = Server(server_name)
+    if hasattr(Server, "list_tools"):
+        # SDK 1.x remains usable by standalone stdio deployments.
+        server = Server(server_name, version=server_version)
 
-    # Register tools/list handler
-    @server.list_tools()
-    async def handle_list_tools() -> List[types.Tool]:
-        """Handle tools/list request."""
-        return protocol_handler.get_tool_schemas()
+        @server.list_tools()
+        async def handle_list_tools() -> List[types.Tool]:
+            return protocol_handler.get_tool_schemas()
 
-    # Register tools/call handler
-    @server.call_tool()
-    async def handle_call_tool(
-        name: str, arguments: Dict[str, Any]
-    ) -> types.CallToolResult:
-        """Handle tools/call request."""
-        return await protocol_handler.execute_tool(name, arguments)
+        @server.call_tool()
+        async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> types.CallToolResult:
+            return await protocol_handler.execute_tool(name, arguments)
+    else:
+        # FastMCP 4 requires SDK 2.x, whose low-level handlers receive context
+        # and typed params and return complete protocol results.
+        async def handle_list_tools_v2(ctx, params):
+            return types.ListToolsResult(tools=protocol_handler.get_tool_schemas())
+
+        async def handle_call_tool_v2(ctx, params):
+            return await protocol_handler.execute_tool(params.name, params.arguments or {})
+
+        server = Server(
+            server_name, version=server_version,
+            on_list_tools=handle_list_tools_v2,
+            on_call_tool=handle_call_tool_v2,
+        )
 
     # Store protocol handler on server for access
     server._protocol_handler = protocol_handler  # type: ignore[attr-defined]

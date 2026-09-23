@@ -860,7 +860,7 @@ class TestExecuteMethod:
         
         result = await tool_with_config.execute(doc_id="doc_abc123")
         
-        assert result.isError is False
+        assert result.is_error is False
         assert len(result.content) == 1
         assert result.content[0].type == "text"
         assert "Test Document Title" in result.content[0].text
@@ -879,7 +879,7 @@ class TestExecuteMethod:
         
         result = await tool_with_config.execute(doc_id="nonexistent")
         
-        assert result.isError is True
+        assert result.is_error is True
         assert "Not Found" in result.content[0].text
     
     @pytest.mark.asyncio
@@ -905,7 +905,7 @@ class TestExecuteMethod:
             collection="custom_collection"
         )
         
-        assert result.isError is False
+        assert result.is_error is False
         # Verify _get_collection was called (via _find_document_chunks)
         mock_get_collection.assert_called()
 

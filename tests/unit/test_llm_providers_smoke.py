@@ -23,6 +23,7 @@ from src.libs.llm import (
     OpenAILLM,
     OpenAILLMError,
 )
+from src.libs.llm.openai_vision_llm import OpenAIVisionLLM
 
 
 # -----------------------------------------------------------------------------
@@ -60,6 +61,19 @@ class MockLLMSettings:
     model: str = "gpt-4o-mini"
     temperature: float = 0.0
     max_tokens: int = 1024
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+@dataclass
+class MockVisionLLMSettings:
+    """Mock settings for OpenAI-compatible Vision LLM testing."""
+
+    provider: str = "openai"
+    model: str = "gpt-4o"
+    max_image_size: int = 2048
+    api_key: str | None = None
+    base_url: str | None = None
 
 
 @dataclass
@@ -67,6 +81,7 @@ class MockSettings:
     """Mock application settings."""
     
     llm: MockLLMSettings = None
+    vision_llm: MockVisionLLMSettings | None = None
     
     def __post_init__(self):
         if self.llm is None:
@@ -209,6 +224,14 @@ class TestOpenAILLM:
         settings = MockSettings()
         llm = OpenAILLM(settings, api_key="test-key", base_url="https://custom.api.com")
         assert llm.base_url == "https://custom.api.com"
+
+    def test_base_url_from_settings(self):
+        """Should use OpenAI-compatible base URL from settings."""
+        settings = MockSettings(
+            llm=MockLLMSettings(base_url="https://openrouter.ai/api/v1")
+        )
+        llm = OpenAILLM(settings, api_key="test-key")
+        assert llm.base_url == "https://openrouter.ai/api/v1"
     
     def test_chat_success(self):
         """Should return ChatResponse on successful API call."""
@@ -254,6 +277,35 @@ class TestOpenAILLM:
             
             with pytest.raises(OpenAILLMError, match="API error"):
                 llm.chat([Message(role="user", content="Hello")])
+
+
+class TestOpenAIVisionLLM:
+    """Tests for OpenAI-compatible Vision LLM configuration."""
+
+    def test_base_url_from_vision_settings(self):
+        """Should use OpenAI-compatible base URL from vision settings."""
+        settings = MockSettings(
+            vision_llm=MockVisionLLMSettings(
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+            )
+        )
+        llm = OpenAIVisionLLM(settings)
+
+        assert llm.base_url == "https://openrouter.ai/api/v1"
+
+    def test_base_url_falls_back_to_llm_settings(self):
+        """Should use LLM base URL when vision settings omit it."""
+        settings = MockSettings(
+            llm=MockLLMSettings(
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+            ),
+            vision_llm=MockVisionLLMSettings(),
+        )
+        llm = OpenAIVisionLLM(settings)
+
+        assert llm.base_url == "https://openrouter.ai/api/v1"
 
 
 # -----------------------------------------------------------------------------

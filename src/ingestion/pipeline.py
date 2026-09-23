@@ -19,6 +19,7 @@ Design Principles:
 from pathlib import Path
 from typing import Callable, List, Optional, Dict, Any
 import time
+import os
 
 from src.core.settings import Settings, load_settings, resolve_path
 from src.core.types import Document, Chunk
@@ -28,6 +29,7 @@ from src.observability.logger import get_logger
 # Libs layer imports
 from src.libs.loader.file_integrity import SQLiteIntegrityChecker
 from src.libs.loader.pdf_loader import PdfLoader
+from src.libs.loader.mineru_pdf_loader import MineruPdfLoader
 from src.libs.embedding.embedding_factory import EmbeddingFactory
 from src.libs.vector_store.vector_store_factory import VectorStoreFactory
 
@@ -142,11 +144,32 @@ class IngestionPipeline:
         logger.info("  ✓ FileIntegrityChecker initialized")
         
         # Stage 2: Loader
-        self.loader = PdfLoader(
-            extract_images=True,
-            image_storage_dir=str(resolve_path(f"data/images/{collection}"))
-        )
-        logger.info("  ✓ PdfLoader initialized")
+        # Dynamically choose PDF loader based on configuration
+        image_storage_dir = str(resolve_path(f"data/images/{collection}"))
+        loader_config = settings.ingestion.pdf_loader if settings.ingestion else None
+        loader_type = loader_config.get("type", "makeitdown") if loader_config else "makeitdown"
+        
+        if loader_type == "mineru":
+            # Initialize MinerU PDF Loader
+            mineru_config = loader_config.get("mineru", {}) if loader_config else {}
+            api_key = mineru_config.get("api_key") or os.environ.get("MINERU_API_KEY")
+            self.loader = MineruPdfLoader(
+                api_url=mineru_config.get("api_url", "https://mineru.net/api/v4"),
+                api_key=api_key,
+                timeout=mineru_config.get("timeout", 60),
+                model_version=mineru_config.get("model_version", "vlm"),
+                poll_interval=mineru_config.get("poll_interval", 5),
+                extract_images=mineru_config.get("extract_images", True),
+                image_storage_dir=image_storage_dir,
+            )
+            logger.info(f"  ✓ MineruPdfLoader initialized (api_url={mineru_config.get('api_url')}, model={mineru_config.get('model_version', 'vlm')})")
+        else:
+            # Default to MarkItDown PDF Loader
+            self.loader = PdfLoader(
+                extract_images=True,
+                image_storage_dir=image_storage_dir
+            )
+            logger.info("  ✓ PdfLoader (MarkItDown) initialized")
         
         # Stage 3: Chunker
         self.chunker = DocumentChunker(settings)
@@ -273,7 +296,7 @@ class IngestionPipeline:
             }
             if trace is not None:
                 trace.record_stage("load", {
-                    "method": "markitdown",
+                    "method": "mineru",
                     "doc_id": document.id,
                     "text_length": len(document.text),
                     "image_count": image_count,
@@ -457,6 +480,7 @@ class IngestionPipeline:
             # Note: Images are already saved by PdfLoader, we just need to index them
             logger.info("  6c. Image Storage Index...")
             images = document.metadata.get("images", [])
+            indexed_images = 0
             for img in images:
                 img_path = Path(img["path"])
                 if img_path.exists():
@@ -467,12 +491,15 @@ class IngestionPipeline:
                         doc_hash=file_hash,
                         page_num=img.get("page", 0)
                     )
-            logger.info(f"      Indexed {len(images)} images")
+                    indexed_images += 1
+                else:
+                    logger.warning(f"      Image file not found, skipped indexing: {img_path}")
+            logger.info(f"      Indexed {indexed_images}/{len(images)} images")
             
             stages["storage"] = {
                 "vector_count": len(vector_ids),
                 "bm25_docs": len(sparse_stats),
-                "images_indexed": len(images)
+                "images_indexed": indexed_images
             }
             _elapsed_storage = (time.monotonic() - _t0_storage) * 1000.0
             if trace is not None:
@@ -511,7 +538,7 @@ class IngestionPipeline:
                     },
                     "image_store": {
                         "backend": "ImageStorage (JSON index)",
-                        "count": len(images),
+                        "count": indexed_images,
                         "images": image_storage_details,
                     },
                     "chunk_mapping": chunk_storage,

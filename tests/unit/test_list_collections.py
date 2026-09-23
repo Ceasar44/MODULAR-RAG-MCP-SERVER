@@ -546,7 +546,7 @@ class TestExecuteMethod:
         ):
             result = await tool_with_config.execute(include_stats=True)
         
-        assert result.isError is False
+        assert result.is_error is False
         assert len(result.content) == 1
         assert result.content[0].type == "text"
         assert "Available Collections (3 total)" in result.content[0].text
@@ -560,7 +560,7 @@ class TestExecuteMethod:
         with patch.object(tool_with_config, 'list_collections', return_value=[]):
             result = await tool_with_config.execute()
         
-        assert result.isError is False
+        assert result.is_error is False
         assert "No collections found" in result.content[0].text
     
     @pytest.mark.asyncio
@@ -576,7 +576,7 @@ class TestExecuteMethod:
         ):
             result = await tool_with_config.execute()
         
-        assert result.isError is True
+        assert result.is_error is True
         assert "Error listing collections" in result.content[0].text
     
     @pytest.mark.asyncio
@@ -590,7 +590,7 @@ class TestExecuteMethod:
         with patch.object(tool_with_config, 'list_collections', mock_list):
             await tool_with_config.execute(include_stats=False)
         
-        mock_list.assert_called_once_with(include_stats=False)
+        mock_list.assert_called_once_with(False)
 
 
 # =============================================================================

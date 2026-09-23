@@ -7,6 +7,7 @@ a lightweight, open-source embedding database designed for local-first deploymen
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -268,7 +269,7 @@ class ChromaStore(BaseVectorStore):
                     'id': record_id,
                     'score': max(0.0, score),  # Clamp to [0, 1]
                     'text': documents[i] if documents[i] else '',  # Include text from documents
-                    'metadata': metadatas[i] if metadatas[i] else {}
+                    'metadata': self._deserialize_metadata(metadatas[i] if metadatas[i] else {})
                 })
         
         logger.debug(f"Query returned {len(output)} results")
@@ -395,14 +396,27 @@ class ChromaStore(BaseVectorStore):
             elif value is None:
                 # Skip None values
                 continue
-            elif isinstance(value, (list, tuple)):
-                # Convert to comma-separated string
-                sanitized[key] = ",".join(str(v) for v in value)
+            elif isinstance(value, (list, tuple, dict)):
+                # Preserve structured metadata such as images and captions.
+                sanitized[key] = json.dumps(value, ensure_ascii=False)
             else:
                 # Convert to string as fallback
                 sanitized[key] = str(value)
         
         return sanitized
+
+    def _deserialize_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Restore structured metadata values serialized for ChromaDB."""
+        restored: Dict[str, Any] = {}
+        for key, value in metadata.items():
+            if isinstance(value, str) and value[:1] in ("[", "{"):
+                try:
+                    restored[key] = json.loads(value)
+                    continue
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+            restored[key] = value
+        return restored
     
     def _build_where_clause(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         """Build ChromaDB where clause from filters.
@@ -505,7 +519,7 @@ class ChromaStore(BaseVectorStore):
                 id_to_result[record_id] = {
                     'id': record_id,
                     'text': documents[i] if documents and documents[i] else '',
-                    'metadata': metadatas[i] if metadatas and metadatas[i] else {}
+                    'metadata': self._deserialize_metadata(metadatas[i] if metadatas and metadatas[i] else {})
                 }
         
         # Return results in the same order as input ids

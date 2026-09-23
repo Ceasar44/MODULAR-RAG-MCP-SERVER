@@ -82,8 +82,10 @@ class OpenAIEmbedding(BaseEmbedding):
         self.api_version = getattr(settings.embedding, 'api_version', None)
         self._use_azure_auth = False
         
-        if base_url:
-            self.base_url = base_url
+        settings_base_url = getattr(settings.embedding, 'base_url', None)
+
+        if base_url or settings_base_url:
+            self.base_url = base_url or settings_base_url
         elif azure_endpoint:
             # Azure-compatible mode: construct deployment-based URL
             deployment = getattr(settings.embedding, 'deployment_name', None) or self.model
@@ -92,8 +94,7 @@ class OpenAIEmbedding(BaseEmbedding):
             if not self.api_version:
                 self.api_version = "2024-02-15-preview"
         else:
-            settings_base_url = getattr(settings.embedding, 'base_url', None)
-            self.base_url = settings_base_url if settings_base_url else self.DEFAULT_BASE_URL
+            self.base_url = self.DEFAULT_BASE_URL
         
         # Store any additional kwargs for future use
         self._extra_config = kwargs
@@ -149,10 +150,10 @@ class OpenAIEmbedding(BaseEmbedding):
             "model": self.model,
         }
         
-        # Add dimensions if specified (only for text-embedding-3-* models)
-        # text-embedding-ada-002 does NOT support the dimensions parameter
+        # Add dimensions only for models known to support dimension shortening.
+        # text-embedding-ada-002 does NOT support the dimensions parameter.
         dimensions = kwargs.get("dimensions", self.dimensions)
-        if dimensions is not None and self.model.startswith("text-embedding-3"):
+        if dimensions is not None and self._supports_dimensions(self.model):
             api_params["dimensions"] = dimensions
         
         # Call OpenAI API
@@ -179,6 +180,16 @@ class OpenAIEmbedding(BaseEmbedding):
             )
         
         return embeddings
+
+    @staticmethod
+    def _supports_dimensions(model: str) -> bool:
+        """Return whether the embedding model accepts a dimensions parameter."""
+        normalized = model.lower()
+        return (
+            normalized.startswith("text-embedding-3")
+            or normalized.startswith("openai/text-embedding-3")
+            or normalized.startswith("qwen/qwen3-embedding")
+        )
     
     def get_dimension(self) -> Optional[int]:
         """Get the embedding dimension for the configured model.

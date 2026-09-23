@@ -129,6 +129,7 @@ class QueryKnowledgeHubTool:
         # Track initialization state
         self._initialized = False
         self._current_collection: Optional[str] = None
+        self._execution_lock = asyncio.Lock()
     
     @property
     def settings(self) -> Settings:
@@ -217,6 +218,33 @@ class QueryKnowledgeHubTool:
         logger.info(f"Query components initialized for collection: {collection}")
     
     async def execute(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        collection: Optional[str] = None,
+    ) -> MCPToolResponse:
+        """Serialize collection initialization, search, rerank and response building.
+
+        Cancellation must not release the lock while to_thread workers still
+        use shared runtime state. Drain the shielded query before propagating it.
+        """
+        async with self._execution_lock:
+            task = asyncio.create_task(self._execute(query, top_k, collection))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not task.cancelled():
+                    task.exception()  # Retrieve any failure during cancellation.
+                raise
+
+    async def _execute(
         self,
         query: str,
         top_k: Optional[int] = None,

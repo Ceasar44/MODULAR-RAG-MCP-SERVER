@@ -146,8 +146,15 @@ class ResponseBuilder:
     def multimodal_assembler(self) -> "MultimodalAssembler":
         """Get or create MultimodalAssembler instance."""
         if self._multimodal_assembler is None:
+            from src.core.settings import resolve_path
             from src.core.response.multimodal_assembler import MultimodalAssembler
-            self._multimodal_assembler = MultimodalAssembler()
+            from src.ingestion.storage.image_storage import ImageStorage
+
+            image_storage = ImageStorage(
+                db_path=str(resolve_path("data/db/image_index.db")),
+                images_root=str(resolve_path("data/images")),
+            )
+            self._multimodal_assembler = MultimodalAssembler(image_storage=image_storage)
         return self._multimodal_assembler
     
     def build(
